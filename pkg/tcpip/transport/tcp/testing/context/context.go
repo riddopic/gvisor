@@ -886,6 +886,18 @@ func (r *RawEndpoint) VerifyACKHasSACK(sackBlocks []header.SACKBlock) {
 // It also verifies where required(eg.Timestamp) that the ACK to the SYN-ACK
 // does not carry an option that was not requested.
 func (c *Context) CreateConnectedWithOptions(wantOptions header.TCPSynOptions) *RawEndpoint {
+	return c.CreateConnectedWithOptionsAndDelay(wantOptions, time.Duration(0))
+}
+
+// CreateConnectedWithOptionsAndDelay creates and connects c.ep with the
+// specified TCP options enabled and returns a RawEndpoint which represents the
+// other end of the connection. It delays before a SYNACK is sent. This makes
+// c.EP have a higher RTT estimate so that spurious TLPs aren't sent in rack
+// tests, which helps reduce flakiness.
+//
+// It also verifies where required(eg.Timestamp) that the ACK to the SYN-ACK
+// does not carry an option that was not requested.
+func (c *Context) CreateConnectedWithOptionsAndDelay(wantOptions header.TCPSynOptions, delay time.Duration) *RawEndpoint {
 	var err tcpip.Error
 	c.EP, err = c.s.NewEndpoint(tcp.ProtocolNumber, ipv4.ProtocolNumber, &c.WQ)
 	if err != nil {
@@ -948,6 +960,9 @@ func (c *Context) CreateConnectedWithOptions(wantOptions header.TCPSynOptions) *
 	// Build SYN-ACK.
 	c.IRS = seqnum.Value(tcpSeg.SequenceNumber())
 	iss := seqnum.Value(TestInitialSequenceNumber)
+	if delay > 0 {
+		time.Sleep(delay)
+	}
 	c.SendPacket(nil, &Headers{
 		SrcPort: tcpSeg.DestinationPort(),
 		DstPort: tcpSeg.SourcePort(),
@@ -1023,6 +1038,17 @@ func (c *Context) CreateConnectedWithOptions(wantOptions header.TCPSynOptions) *
 // The function returns a RawEndpoint representing the other end of the accepted
 // endpoint.
 func (c *Context) AcceptWithOptions(wndScale int, synOptions header.TCPSynOptions) *RawEndpoint {
+	return c.AcceptWithOptionsAndDelay(wndScale, synOptions, time.Duration(0))
+}
+
+// AcceptWithOptionsAndDelay initializes a listening endpoint and connects to it
+// with the provided options enabled. It delays before the final ACK of the 3WHS
+// is sent. It also verifies that the SYN-ACK has the expected values for the
+// provided options.
+//
+// The function returns a RawEndpoint representing the other end of the accepted
+// endpoint.
+func (c *Context) AcceptWithOptionsAndDelay(wndScale int, synOptions header.TCPSynOptions, delay time.Duration) *RawEndpoint {
 	// Create EP and start listening.
 	wq := &waiter.Queue{}
 	ep, err := c.s.NewEndpoint(tcp.ProtocolNumber, ipv4.ProtocolNumber, wq)
@@ -1045,7 +1071,7 @@ func (c *Context) AcceptWithOptions(wndScale int, synOptions header.TCPSynOption
 		c.t.Errorf("Unexpected endpoint state: want %v, got %v", want, got)
 	}
 
-	rep := c.PassiveConnectWithOptions(100, wndScale, synOptions)
+	rep := c.PassiveConnectWithOptionsAndDelay(100, wndScale, synOptions, delay)
 
 	// Try to accept the connection.
 	we, ch := waiter.NewChannelEntry(nil)
@@ -1094,6 +1120,24 @@ func (c *Context) PassiveConnect(maxPayload, wndScale int, synOptions header.TCP
 // value of the window scaling option to be sent in the SYN. If synOptions.WS >
 // 0 then we send the WindowScale option.
 func (c *Context) PassiveConnectWithOptions(maxPayload, wndScale int, synOptions header.TCPSynOptions) *RawEndpoint {
+	return c.PassiveConnectWithOptionsAndDelay(maxPayload, wndScale, synOptions, time.Duration(0))
+}
+
+// PassiveConnectWithOptionsAndDelay initiates a new connection (with the
+// specified TCP options enabled) to the port on which the Context.ep is
+// listening for new connections. It also validates that the SYN-ACK has
+// the expected values for the enabled options. The final ACK of the 3WHS
+// is delayed by specified duration.
+//
+// NOTE: MSS is not a negotiated option and it can be asymmetric
+// in each direction. This function uses the maxPayload to set the MSS to be
+// sent to the peer on a connect and validates that the MSS in the SYN-ACK
+// response is equal to the MTU - (tcphdr len + iphdr len).
+//
+// wndScale is the expected window scale in the SYN-ACK and synOptions.WS is the
+// value of the window scaling option to be sent in the SYN. If synOptions.WS >
+// 0 then we send the WindowScale option.
+func (c *Context) PassiveConnectWithOptionsAndDelay(maxPayload, wndScale int, synOptions header.TCPSynOptions, delay time.Duration) *RawEndpoint {
 	c.t.Helper()
 	opts := make([]byte, header.TCPOptionsMaximumSize)
 	offset := 0
@@ -1180,7 +1224,10 @@ func (c *Context) PassiveConnectWithOptions(maxPayload, wndScale int, synOptions
 		ackHeaders.TCPOpts = opts[:]
 	}
 
-	// Send ACK.
+	// Send ACK, delay if needed.
+	if delay > 0 {
+		time.Sleep(delay)
+	}
 	c.SendPacket(nil, ackHeaders)
 
 	c.RcvdWindowScale = uint8(rcvdSynOptions.WS)

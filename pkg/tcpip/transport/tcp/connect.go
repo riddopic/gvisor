@@ -266,8 +266,13 @@ func (h *handshake) synSentState(s *segment) tcpip.Error {
 	// and the handshake is completed.
 	if s.flags.Contains(header.TCPFlagAck) {
 		h.state = handshakeCompleted
-
-		h.ep.transitionToStateEstablishedLocked(h)
+		var rtt time.Duration
+		if h.ep.SendTSOk && s.parsedOptions.TSEcr != 0 {
+			rtt = time.Duration(s.ep.timestamp()-s.parsedOptions.TSEcr) * time.Millisecond
+		} else {
+			rtt = h.ep.stack.Clock().NowMonotonic().Sub(h.startTime)
+		}
+		h.ep.transitionToStateEstablishedLocked(h, rtt)
 
 		h.ep.sendRaw(buffer.VectorisedView{}, header.TCPFlagAck, h.iss+1, h.ackNum, h.rcvWnd>>h.effectiveRcvWndScale())
 		return nil
@@ -402,9 +407,16 @@ func (h *handshake) synRcvdState(s *segment) tcpip.Error {
 		if h.ep.SendTSOk && s.parsedOptions.TS {
 			h.ep.updateRecentTimestamp(s.parsedOptions.TSVal, h.ackNum, s.sequenceNumber)
 		}
+
 		h.state = handshakeCompleted
 
-		h.ep.transitionToStateEstablishedLocked(h)
+		var rtt time.Duration
+		if h.ep.SendTSOk && s.parsedOptions.TSEcr != 0 {
+			rtt = time.Duration(s.ep.timestamp()-s.parsedOptions.TSEcr) * time.Millisecond
+		} else {
+			rtt = h.ep.stack.Clock().NowMonotonic().Sub(h.startTime)
+		}
+		h.ep.transitionToStateEstablishedLocked(h, rtt)
 
 		// Requeue the segment if the ACK completing the handshake has more info
 		// to be procesed by the newly established endpoint.
@@ -968,11 +980,14 @@ func (e *endpoint) completeWorkerLocked() {
 // transitionToStateEstablisedLocked transitions a given endpoint
 // to an established state using the handshake parameters provided.
 // It also initializes sender/receiver.
-func (e *endpoint) transitionToStateEstablishedLocked(h *handshake) {
+func (e *endpoint) transitionToStateEstablishedLocked(h *handshake, rtt time.Duration) {
 	// Transfer handshake state to TCP connection. We disable
 	// receive window scaling if the peer doesn't support it
 	// (indicated by a negative send window scale).
 	e.snd = newSender(e, h.iss, h.ackNum-1, h.sndWnd, h.mss, h.sndWndScale)
+	if rtt != time.Duration(0) {
+		e.snd.updateRTO(rtt)
+	}
 
 	e.rcvQueueInfo.rcvQueueMu.Lock()
 	e.rcv = newReceiver(e, h.ackNum-1, h.rcvWnd, h.effectiveRcvWndScale())

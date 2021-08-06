@@ -160,10 +160,13 @@ func TestRACKDetectReorder(t *testing.T) {
 
 func sendAndReceiveWithSACK(t *testing.T, c *context.Context, numPackets int, enableRACK bool) []byte {
 	setStackSACKPermitted(t, c, true)
+	var delay time.Duration
 	if !enableRACK {
 		setStackTCPRecovery(t, c, 0)
+	} else {
+		delay = 800 * time.Millisecond
 	}
-	createConnectedWithSACKAndTS(c)
+	c.CreateConnectedWithOptionsAndDelay(header.TCPSynOptions{SACKPermitted: c.SACKEnabled(), TS: true}, delay)
 
 	data := make([]byte, numPackets*maxPayload)
 	for i := range data {

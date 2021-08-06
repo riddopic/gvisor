@@ -111,6 +111,9 @@ type listenContext struct {
 	// pendingEndpoints is a map of all endpoints for which a handshake is
 	// in progress.
 	pendingEndpoints map[stack.TransportEndpointID]*endpoint
+
+	// tsOffsetSecret is the secret key for generating timestamp offset.
+	tsOffsetSecret uint32
 }
 
 // timeStamp returns an 8-bit timestamp with a granularity of 64 seconds.
@@ -130,6 +133,12 @@ func newListenContext(stk *stack.Stack, listenEP *endpoint, rcvWnd seqnum.Size, 
 		pendingEndpoints: make(map[stack.TransportEndpointID]*endpoint),
 	}
 
+	var tsOffsetSecret [4]byte
+	if _, err := io.ReadFull(stk.SecureRNG(), tsOffsetSecret[:]); err != nil {
+		panic(fmt.Sprintf("SecureRNG.Read(...): %s", err))
+	}
+	l.tsOffsetSecret = binary.LittleEndian.Uint32(tsOffsetSecret[:])
+
 	for i := range l.nonce {
 		if _, err := io.ReadFull(stk.SecureRNG(), l.nonce[i][:]); err != nil {
 			panic(err)
@@ -137,6 +146,18 @@ func newListenContext(stk *stack.Stack, listenEP *endpoint, rcvWnd seqnum.Size, 
 	}
 
 	return l
+}
+
+// cookieTSOffset computes the TSOffset for the connection.
+func (l *listenContext) cookieTSOffset(src, dst tcpip.Address) uint32 {
+	h := sha1.New()
+	// Per hash.Hash.Writer:
+	//
+	// It never returns an error.
+	h.Write([]byte(src))
+	h.Write([]byte(dst))
+	s := h.Sum(nil)
+	return binary.LittleEndian.Uint32(s[:])
 }
 
 // cookieHash calculates the cookieHash for the given id, timestamp and nonce
@@ -600,7 +621,7 @@ func (e *endpoint) handleListenSegment(ctx *listenContext, s *segment) tcpip.Err
 		synOpts := header.TCPSynOptions{
 			WS:    -1,
 			TS:    opts.TS,
-			TSVal: tcpTimeStamp(e.stack.Clock().NowMonotonic(), timeStampOffset(e.stack.Rand())),
+			TSVal: tcpTimeStamp(e.stack.Clock().NowMonotonic(), ctx.cookieTSOffset(s.srcAddr, s.dstAddr)),
 			TSEcr: opts.TSVal,
 			MSS:   calculateAdvertisedMSS(e.userMSS, route),
 		}
@@ -730,7 +751,12 @@ func (e *endpoint) handleListenSegment(ctx *listenContext, s *segment) tcpip.Err
 		// endpoint as the Timestamp was already
 		// randomly offset when the original SYN-ACK was
 		// sent above.
-		n.TSOffset = 0
+		n.TSOffset = ctx.cookieTSOffset(s.srcAddr, s.dstAddr)
+
+		var rtt time.Duration
+		if n.SendTSOk && rcvdSynOptions.TSEcr != 0 {
+			rtt = time.Duration(n.timestamp()-rcvdSynOptions.TSEcr) * time.Millisecond
+		}
 
 		// Switch state to connected.
 		n.isConnectNotified = true
@@ -743,7 +769,7 @@ func (e *endpoint) handleListenSegment(ctx *listenContext, s *segment) tcpip.Err
 			rcvWndScale: e.rcvWndScaleForHandshake(),
 			sndWndScale: rcvdSynOptions.WS,
 			mss:         rcvdSynOptions.MSS,
-		})
+		}, rtt)
 
 		// Requeue the segment if the ACK completing the handshake has more info
 		// to be procesed by the newly established endpoint.

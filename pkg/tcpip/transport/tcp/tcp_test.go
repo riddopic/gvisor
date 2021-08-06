@@ -3532,6 +3532,12 @@ func TestMaxRetransmitsTimeout(t *testing.T) {
 		t.Fatalf("SetTransportProtocolOption(%d, &%T(%d)): %s", tcp.ProtocolNumber, opt, opt, err)
 	}
 
+	// Wait for the connection to timeout after MaxRetries retransmits.
+	initRTO := 1 * time.Second
+	minRTOOpt := tcpip.TCPMinRTOOption(initRTO)
+	if err := c.Stack().SetTransportProtocolOption(tcp.ProtocolNumber, &minRTOOpt); err != nil {
+		t.Fatalf("SetTransportProtocolOption(%d, &%T(%d)): %s", tcp.ProtocolNumber, minRTOOpt, minRTOOpt, err)
+	}
 	c.CreateConnected(context.TestInitialSequenceNumber, 30000 /* rcvWnd */, -1 /* epRcvBuf */)
 
 	waitEntry, notifyCh := waiter.NewChannelEntry(nil)
@@ -3554,8 +3560,6 @@ func TestMaxRetransmitsTimeout(t *testing.T) {
 			),
 		)
 	}
-	// Wait for the connection to timeout after MaxRetries retransmits.
-	initRTO := 1 * time.Second
 	select {
 	case <-notifyCh:
 	case <-time.After((2 << numRetries) * initRTO):
@@ -3590,9 +3594,13 @@ func TestMaxRTO(t *testing.T) {
 	defer c.Cleanup()
 
 	rto := 1 * time.Second
-	opt := tcpip.TCPMaxRTOOption(rto)
-	if err := c.Stack().SetTransportProtocolOption(tcp.ProtocolNumber, &opt); err != nil {
-		t.Fatalf("SetTransportProtocolOption(%d, &%T(%d)): %s", tcp.ProtocolNumber, opt, opt, err)
+	minRTOOpt := tcpip.TCPMinRTOOption(rto / 2)
+	if err := c.Stack().SetTransportProtocolOption(tcp.ProtocolNumber, &minRTOOpt); err != nil {
+		t.Fatalf("SetTransportProtocolOption(%d, &%T(%d)): %s", tcp.ProtocolNumber, minRTOOpt, minRTOOpt, err)
+	}
+	maxRTOOpt := tcpip.TCPMaxRTOOption(rto)
+	if err := c.Stack().SetTransportProtocolOption(tcp.ProtocolNumber, &maxRTOOpt); err != nil {
+		t.Fatalf("SetTransportProtocolOption(%d, &%T(%d)): %s", tcp.ProtocolNumber, maxRTOOpt, maxRTOOpt, err)
 	}
 
 	c.CreateConnected(context.TestInitialSequenceNumber, 30000 /* rcvWnd */, -1 /* epRcvBuf */)
@@ -3618,8 +3626,10 @@ func TestMaxRTO(t *testing.T) {
 				checker.TCPFlagsMatch(header.TCPFlagAck, ^header.TCPFlagPsh),
 			),
 		)
+		elapsed := time.Since(start)
+		t.Logf("elapsed: %s", elapsed)
 		if time.Since(start).Round(time.Second).Seconds() != rto.Seconds() {
-			t.Errorf("Retransmit interval not capped to MaxRTO.\n")
+			t.Errorf("Retransmit interval not capped to MaxRTO. %s", elapsed)
 		}
 	}
 }
@@ -3670,6 +3680,10 @@ func TestRetransmitIPv4IDUniqueness(t *testing.T) {
 			c := context.New(t, defaultMTU)
 			defer c.Cleanup()
 
+			minRTOOpt := tcpip.TCPMinRTOOption(time.Second)
+			if err := c.Stack().SetTransportProtocolOption(tcp.ProtocolNumber, &minRTOOpt); err != nil {
+				t.Fatalf("SetTransportProtocolOption(%d, &%T(%d)): %s", tcp.ProtocolNumber, minRTOOpt, minRTOOpt, err)
+			}
 			c.CreateConnected(context.TestInitialSequenceNumber, 30000 /* rcvWnd */, -1 /* epRcvBuf */)
 
 			// Disabling PMTU discovery causes all packets sent from this socket to
@@ -7430,6 +7444,11 @@ func TestTCPUserTimeout(t *testing.T) {
 	c := context.New(t, defaultMTU)
 	defer c.Cleanup()
 
+	initRTO := 1 * time.Second
+	minRTOOpt := tcpip.TCPMinRTOOption(initRTO)
+	if err := c.Stack().SetTransportProtocolOption(tcp.ProtocolNumber, &minRTOOpt); err != nil {
+		t.Fatalf("SetTransportProtocolOption(%d, &%T(%d)): %s", tcp.ProtocolNumber, minRTOOpt, minRTOOpt, err)
+	}
 	c.CreateConnected(context.TestInitialSequenceNumber, 30000, -1 /* epRcvBuf */)
 
 	waitEntry, notifyCh := waiter.NewChannelEntry(nil)
@@ -7440,7 +7459,6 @@ func TestTCPUserTimeout(t *testing.T) {
 
 	// Ensure that on the next retransmit timer fire, the user timeout has
 	// expired.
-	initRTO := 1 * time.Second
 	userTimeout := initRTO / 2
 	v := tcpip.TCPUserTimeoutOption(userTimeout)
 	if err := c.EP.SetSockOpt(&v); err != nil {
@@ -7951,6 +7969,83 @@ func TestSetStackTimeWaitReuse(t *testing.T) {
 		if got, want := twReuse, tcpip.TCPTimeWaitReuseOption(tc.v); got != want {
 			t.Fatalf("got tcpip.TCPTimeWaitReuseOption: %v, want: %v", got, want)
 		}
+	}
+}
+
+func TestHandshakeRTT(t *testing.T) {
+	const delay = 800 * time.Millisecond
+	for _, tt := range []struct {
+		name      string
+		active    bool
+		tsEnabled bool
+		useCookie bool
+		wantRTT   time.Duration
+	}{
+		{
+			name:      "active/TS",
+			active:    true,
+			tsEnabled: true,
+			wantRTT:   delay,
+		},
+		{
+			name:    "active/NoTS",
+			active:  true,
+			wantRTT: delay,
+		},
+		{
+			name:      "passive/TS",
+			tsEnabled: true,
+			wantRTT:   delay,
+		},
+		{
+			name:    "passive/NoTS",
+			wantRTT: delay,
+		},
+		{
+			name:      "cookie/TS",
+			useCookie: true,
+			tsEnabled: true,
+			wantRTT:   delay,
+		},
+		{
+			name:      "cookie/NoTS",
+			useCookie: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := context.New(t, defaultMTU)
+			if tt.useCookie {
+				opt := tcpip.TCPAlwaysUseSynCookies(true)
+				if err := c.Stack().SetTransportProtocolOption(tcp.ProtocolNumber, &opt); err != nil {
+					t.Fatalf("SetTransportProtocolOption(%d, &%T(%t)): %s", tcp.ProtocolNumber, opt, opt, err)
+				}
+			}
+			synOpts := header.TCPSynOptions{}
+			if tt.tsEnabled {
+				synOpts.TS = true
+				synOpts.TSVal = 42
+			}
+			if tt.active {
+				c.CreateConnectedWithOptionsAndDelay(synOpts, delay)
+			} else {
+				synOpts.MSS = defaultIPv4MSS
+				synOpts.WS = -1
+				c.AcceptWithOptionsAndDelay(-1, synOpts, delay)
+			}
+			var info tcpip.TCPInfoOption
+			if err := c.EP.GetSockOpt(&info); err != nil {
+				t.Fatalf("c.EP.GetSockOpt(&%T) = %s", info, err)
+			}
+			if got := time.Duration(info.RTT).Round(tt.wantRTT); got != tt.wantRTT {
+				t.Fatalf("got info.RTT=%s, expect %s", got, tt.wantRTT)
+			}
+			if info.RTTVar != 0 && tt.wantRTT == 0 {
+				t.Fatalf("got info.RTTVar=%s, expect 0", info.RTTVar)
+			}
+			if info.RTTVar == 0 && tt.wantRTT != 0 {
+				t.Fatalf("got info.RTTVar=0, expect non zero")
+			}
+		})
 	}
 }
 

@@ -295,7 +295,11 @@ func (p *protocol) SetOption(option tcpip.SettableTransportProtocolOption) tcpip
 		if *v < 0 {
 			p.minRTO = MinRTO
 		} else {
-			p.minRTO = time.Duration(*v)
+			minRTO := time.Duration(*v)
+			if minRTO > p.maxRTO {
+				return &tcpip.ErrInvalidOptionValue{}
+			}
+			p.minRTO = minRTO
 		}
 		p.mu.Unlock()
 		return nil
@@ -305,7 +309,11 @@ func (p *protocol) SetOption(option tcpip.SettableTransportProtocolOption) tcpip
 		if *v < 0 {
 			p.maxRTO = MaxRTO
 		} else {
-			p.maxRTO = time.Duration(*v)
+			maxRTO := time.Duration(*v)
+			if maxRTO < p.minRTO {
+				return &tcpip.ErrInvalidOptionValue{}
+			}
+			p.maxRTO = maxRTO
 		}
 		p.mu.Unlock()
 		return nil
