@@ -152,6 +152,15 @@ TEST(ProcNetDev, Format) {
   EXPECT_GT(entries.size(), 0);
 }
 
+// GetSNMPMetricFromProc retrieves the metric named `item` of `type` from the
+// `snmp` string which represents the file contents of /proc/net/snmp.
+//
+// Note to test writers: If you are writing tests to check the change in value
+// of SNMP metrics, note that in a test environment where multiple tests run
+// concurrently, tests can trample over these global metric values for each
+// other. So a feasible way of testing is to consult RFC 1213 and only test
+// metrics with "SYNTAX  Counter". These metrics represent increasing functions.
+// So you can reliably test for less than or greater than relations with time.
 PosixErrorOr<uint64_t> GetSNMPMetricFromProc(const std::string snmp,
                                              const std::string& type,
                                              const std::string& item) {
@@ -226,9 +235,10 @@ TEST(ProcNetSnmp, TcpReset) {
   newAttemptFails = ASSERT_NO_ERRNO_AND_VALUE(
       GetSNMPMetricFromProc(snmp, "Tcp", "AttemptFails"));
 
-  EXPECT_EQ(oldActiveOpens, newActiveOpens - 1);
-  EXPECT_EQ(oldOutRsts, newOutRsts - 1);
-  EXPECT_EQ(oldAttemptFails, newAttemptFails - 1);
+  // These metrics should have increased by at least 1.
+  EXPECT_LE(oldActiveOpens, newActiveOpens - 1);
+  EXPECT_LE(oldOutRsts, newOutRsts - 1);
+  EXPECT_LE(oldAttemptFails, newAttemptFails - 1);
 }
 
 TEST(ProcNetSnmp, TcpEstab) {
@@ -238,14 +248,11 @@ TEST(ProcNetSnmp, TcpEstab) {
   uint64_t oldEstabResets;
   uint64_t oldActiveOpens;
   uint64_t oldPassiveOpens;
-  uint64_t oldCurrEstab;
   auto snmp = ASSERT_NO_ERRNO_AND_VALUE(GetContents("/proc/net/snmp"));
   oldActiveOpens = ASSERT_NO_ERRNO_AND_VALUE(
       GetSNMPMetricFromProc(snmp, "Tcp", "ActiveOpens"));
   oldPassiveOpens = ASSERT_NO_ERRNO_AND_VALUE(
       GetSNMPMetricFromProc(snmp, "Tcp", "PassiveOpens"));
-  oldCurrEstab = ASSERT_NO_ERRNO_AND_VALUE(
-      GetSNMPMetricFromProc(snmp, "Tcp", "CurrEstab"));
   oldEstabResets = ASSERT_NO_ERRNO_AND_VALUE(
       GetSNMPMetricFromProc(snmp, "Tcp", "EstabResets"));
 
@@ -274,21 +281,17 @@ TEST(ProcNetSnmp, TcpEstab) {
   auto s_accept =
       ASSERT_NO_ERRNO_AND_VALUE(Accept(s_listen.get(), nullptr, nullptr));
 
-  uint64_t newEstabResets;
   uint64_t newActiveOpens;
   uint64_t newPassiveOpens;
-  uint64_t newCurrEstab;
   snmp = ASSERT_NO_ERRNO_AND_VALUE(GetContents("/proc/net/snmp"));
   newActiveOpens = ASSERT_NO_ERRNO_AND_VALUE(
       GetSNMPMetricFromProc(snmp, "Tcp", "ActiveOpens"));
   newPassiveOpens = ASSERT_NO_ERRNO_AND_VALUE(
       GetSNMPMetricFromProc(snmp, "Tcp", "PassiveOpens"));
-  newCurrEstab = ASSERT_NO_ERRNO_AND_VALUE(
-      GetSNMPMetricFromProc(snmp, "Tcp", "CurrEstab"));
 
-  EXPECT_EQ(oldActiveOpens, newActiveOpens - 1);
-  EXPECT_EQ(oldPassiveOpens, newPassiveOpens - 1);
-  EXPECT_EQ(oldCurrEstab, newCurrEstab - 2);
+  // These metrics should have increased by at least 1.
+  EXPECT_LE(oldActiveOpens, newActiveOpens - 1);
+  EXPECT_LE(oldPassiveOpens, newPassiveOpens - 1);
 
   // Send 1 byte from client to server.
   ASSERT_THAT(send(s_connect.get(), "a", 1, 0), SyscallSucceedsWithValue(1));
@@ -316,13 +319,11 @@ TEST(ProcNetSnmp, TcpEstab) {
   absl::SleepFor(absl::Seconds(1));
 
   snmp = ASSERT_NO_ERRNO_AND_VALUE(GetContents("/proc/net/snmp"));
-  newCurrEstab = ASSERT_NO_ERRNO_AND_VALUE(
-      GetSNMPMetricFromProc(snmp, "Tcp", "CurrEstab"));
-  newEstabResets = ASSERT_NO_ERRNO_AND_VALUE(
+  uint64_t newEstabResets = ASSERT_NO_ERRNO_AND_VALUE(
       GetSNMPMetricFromProc(snmp, "Tcp", "EstabResets"));
 
-  EXPECT_EQ(oldCurrEstab, newCurrEstab);
-  EXPECT_EQ(oldEstabResets, newEstabResets - 2);
+  // EstabResets metric should have increased by at least 2.
+  EXPECT_LE(oldEstabResets, newEstabResets - 2);
 }
 
 TEST(ProcNetSnmp, UdpNoPorts) {
@@ -355,8 +356,9 @@ TEST(ProcNetSnmp, UdpNoPorts) {
   newNoPorts =
       ASSERT_NO_ERRNO_AND_VALUE(GetSNMPMetricFromProc(snmp, "Udp", "NoPorts"));
 
-  EXPECT_EQ(oldOutDatagrams, newOutDatagrams - 1);
-  EXPECT_EQ(oldNoPorts, newNoPorts - 1);
+  // These metrics should have increased by at least 1.
+  EXPECT_LE(oldOutDatagrams, newOutDatagrams - 1);
+  EXPECT_LE(oldNoPorts, newNoPorts - 1);
 }
 
 TEST(ProcNetSnmp, UdpIn) {
@@ -405,8 +407,9 @@ TEST(ProcNetSnmp, UdpIn) {
   newInDatagrams = ASSERT_NO_ERRNO_AND_VALUE(
       GetSNMPMetricFromProc(snmp, "Udp", "InDatagrams"));
 
-  EXPECT_EQ(oldOutDatagrams, newOutDatagrams - 1);
-  EXPECT_EQ(oldInDatagrams, newInDatagrams - 1);
+  // These metrics should have increased by at least 1.
+  EXPECT_LE(oldOutDatagrams, newOutDatagrams - 1);
+  EXPECT_LE(oldInDatagrams, newInDatagrams - 1);
 }
 
 TEST(ProcNetSnmp, CheckNetStat) {
