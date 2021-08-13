@@ -33,6 +33,7 @@ import (
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/buffer"
+	"gvisor.dev/gvisor/pkg/tcpip/hash/jenkins"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/ports"
 	"gvisor.dev/gvisor/pkg/waiter"
@@ -161,6 +162,10 @@ type Stack struct {
 	// This is required to prevent potential ACK loops.
 	// Setting this to 0 will disable all rate limiting.
 	tcpInvalidRateLimit time.Duration
+
+	// tsOffsetSecret is the secret key for generating timestamp offsets
+	// initialized at stack startup.
+	tsOffsetSecret uint32
 }
 
 // UniqueID is an abstract generator of unique identifiers.
@@ -346,6 +351,7 @@ func New(opts Options) *Stack {
 	randomGenerator := rand.New(randSrc)
 
 	seed := randomGenerator.Uint32()
+	tsOffsetSecret := randomGenerator.Uint32()
 	if opts.IPTables == nil {
 		if opts.DefaultIPTables == nil {
 			opts.DefaultIPTables = DefaultTables
@@ -384,6 +390,7 @@ func New(opts Options) *Stack {
 			Max:     DefaultMaxBufferSize,
 		},
 		tcpInvalidRateLimit: defaultTCPInvalidRateLimit,
+		tsOffsetSecret:      tsOffsetSecret,
 	}
 
 	// Add specified network protocols.
@@ -1825,6 +1832,23 @@ func (s *Stack) SetNUDConfigurations(id tcpip.NICID, proto tcpip.NetworkProtocol
 // NOTE: The seed is generated once during stack initialization only.
 func (s *Stack) Seed() uint32 {
 	return s.seed
+}
+
+// TSOffset returns a randomized timestamp offset to be used when sending
+// timestamp values in a timestamp option for a TCP segment.
+func (s *Stack) TSOffset(src, dst tcpip.Address) uint32 {
+	// Initialize a random tsOffset that will be added to the recentTS
+	// everytime the timestamp is sent when the Timestamp option is enabled.
+	//
+	// See https://tools.ietf.org/html/rfc7323#section-5.4 for details on
+	// why this is required.
+	h := jenkins.Sum32(s.tsOffsetSecret)
+	// Per hash.Hash.Writer:
+	//
+	// It never returns an error.
+	h.Write([]byte(src))
+	h.Write([]byte(dst))
+	return h.Sum32()
 }
 
 // Rand returns a reference to a pseudo random generator that can be used

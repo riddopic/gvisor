@@ -28,6 +28,7 @@ import (
 	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/checker"
+	"gvisor.dev/gvisor/pkg/tcpip/faketime"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/link/loopback"
 	"gvisor.dev/gvisor/pkg/tcpip/link/sniffer"
@@ -8053,6 +8054,77 @@ func TestSendBufferTuning(t *testing.T) {
 			if newSz := c.EP.SocketOptions().GetSendBufferSize(); newSz != outSz {
 				t.Fatalf("Wrong send buffer size, got %d want %d", newSz, outSz)
 			}
+		})
+	}
+}
+
+func TestTimestampOffset(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		passive   bool
+		synCookie bool
+	}{
+		{
+			name: "connect",
+		},
+		{
+			name:    "listen no cookie",
+			passive: true,
+		},
+		{
+			name:      "listen with cookie",
+			passive:   true,
+			synCookie: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := context.NewWithOpts(t, context.Options{
+				EnableV4: true,
+				EnableV6: true,
+				MTU:      defaultMTU,
+				Clock:    faketime.NewManualClock(),
+			})
+			defer c.Cleanup()
+			alwaysSynCookie := tcpip.TCPAlwaysUseSynCookies(tt.synCookie)
+			if err := c.Stack().SetTransportProtocolOption(tcp.ProtocolNumber, &alwaysSynCookie); err != nil {
+				t.Fatalf("SetTransportProtocolOption(%d, &%T(%t)): %s", tcp.ProtocolNumber, alwaysSynCookie, alwaysSynCookie, err)
+			}
+			wq := &waiter.Queue{}
+			ep, err := c.Stack().NewEndpoint(tcp.ProtocolNumber, ipv4.ProtocolNumber, wq)
+			if err != nil {
+				t.Fatalf("NewEndpoint failed: %s", err)
+			}
+			defer ep.Close()
+
+			synOpts := [12]byte{header.TCPOptionNOP, header.TCPOptionNOP}
+			header.EncodeTSOption(42, 0, synOpts[2:])
+
+			if tt.passive {
+				if err := ep.Bind(tcpip.FullAddress{Port: context.StackPort}); err != nil {
+					t.Fatalf("Bind failed: %s", err)
+				}
+				if err := ep.Listen(10); err != nil {
+					t.Fatalf("Listen failed: %s", err)
+				}
+				iss := seqnum.Value(context.TestInitialSequenceNumber)
+				c.SendPacket(nil, &context.Headers{
+					SrcPort: context.TestPort,
+					DstPort: context.StackPort,
+					Flags:   header.TCPFlagSyn,
+					SeqNum:  iss,
+					TCPOpts: synOpts[:],
+				})
+			} else {
+				err := ep.Connect(tcpip.FullAddress{Addr: context.TestAddr, Port: context.TestPort})
+				if got, want := err, (&tcpip.ErrConnectStarted{}); got != want {
+					t.Fatalf("got ep.Connect(...) = %s, want %s", got, want)
+				}
+			}
+			b := c.GetPacket()
+			tsOffset := c.Stack().TSOffset(context.StackAddr, context.TestAddr)
+			// We never advance the manual clock, so NowMonotonic should be 0.
+			wantTSVal := 0 + tsOffset
+			checker.IPv4(t, b, checker.TCP(checker.TCPTimestampChecker(true, wantTSVal, 0)))
 		})
 	}
 }
