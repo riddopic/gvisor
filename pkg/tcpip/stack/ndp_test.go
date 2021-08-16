@@ -3644,8 +3644,8 @@ func TestAutoGenAddrAfterRemoval(t *testing.T) {
 		Protocol:          header.IPv6ProtocolNumber,
 		AddressWithPrefix: addr2,
 	}
-	if err := s.AddProtocolAddressWithOptions(nicID, protoAddr2, stack.FirstPrimaryEndpoint); err != nil {
-		t.Fatalf("AddProtocolAddressWithOptions(%d, %+v, %d) = %s", nicID, protoAddr2, stack.FirstPrimaryEndpoint, err)
+	if err := s.AddProtocolAddressWithProperties(nicID, protoAddr2, stack.AddressProperties{PEB: stack.FirstPrimaryEndpoint}); err != nil {
+		t.Fatalf("AddProtocolAddressWithProperties(%d, %+v, stack.AddressProperties{PEB: %d}) = %s", nicID, protoAddr2, stack.FirstPrimaryEndpoint, err)
 	}
 	// addr2 should be more preferred now since it is at the front of the primary
 	// list.

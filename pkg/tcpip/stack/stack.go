@@ -908,7 +908,7 @@ type NICStateFlags struct {
 
 // AddAddress adds a new network-layer address to the specified NIC.
 func (s *Stack) AddAddress(id tcpip.NICID, protocol tcpip.NetworkProtocolNumber, addr tcpip.Address) tcpip.Error {
-	return s.AddAddressWithOptions(id, protocol, addr, CanBePrimaryEndpoint)
+	return s.AddAddressWithProperties(id, protocol, addr, AddressProperties{PEB: CanBePrimaryEndpoint})
 }
 
 // AddAddressWithPrefix is the same as AddAddress, but allows you to specify
@@ -918,34 +918,34 @@ func (s *Stack) AddAddressWithPrefix(id tcpip.NICID, protocol tcpip.NetworkProto
 		Protocol:          protocol,
 		AddressWithPrefix: addr,
 	}
-	return s.AddProtocolAddressWithOptions(id, ap, CanBePrimaryEndpoint)
+	return s.AddProtocolAddressWithProperties(id, ap, AddressProperties{PEB: CanBePrimaryEndpoint})
 }
 
 // AddProtocolAddress adds a new network-layer protocol address to the
 // specified NIC.
 func (s *Stack) AddProtocolAddress(id tcpip.NICID, protocolAddress tcpip.ProtocolAddress) tcpip.Error {
-	return s.AddProtocolAddressWithOptions(id, protocolAddress, CanBePrimaryEndpoint)
+	return s.AddProtocolAddressWithProperties(id, protocolAddress, AddressProperties{PEB: CanBePrimaryEndpoint})
 }
 
-// AddAddressWithOptions is the same as AddAddress, but allows you to specify
-// whether the new endpoint can be primary or not.
-func (s *Stack) AddAddressWithOptions(id tcpip.NICID, protocol tcpip.NetworkProtocolNumber, addr tcpip.Address, peb PrimaryEndpointBehavior) tcpip.Error {
+// AddAddressWithProperties adds a new network-layer address to the specified
+// NIC.
+func (s *Stack) AddAddressWithProperties(id tcpip.NICID, protocol tcpip.NetworkProtocolNumber, addr tcpip.Address, properties AddressProperties) tcpip.Error {
 	netProto, ok := s.networkProtocols[protocol]
 	if !ok {
 		return &tcpip.ErrUnknownProtocol{}
 	}
-	return s.AddProtocolAddressWithOptions(id, tcpip.ProtocolAddress{
+	return s.AddProtocolAddressWithProperties(id, tcpip.ProtocolAddress{
 		Protocol: protocol,
 		AddressWithPrefix: tcpip.AddressWithPrefix{
 			Address:   addr,
 			PrefixLen: netProto.DefaultPrefixLen(),
 		},
-	}, peb)
+	}, properties)
 }
 
-// AddProtocolAddressWithOptions is the same as AddProtocolAddress, but allows
-// you to specify whether the new endpoint can be primary or not.
-func (s *Stack) AddProtocolAddressWithOptions(id tcpip.NICID, protocolAddress tcpip.ProtocolAddress, peb PrimaryEndpointBehavior) tcpip.Error {
+// AddProtocolAddressWithProperties allows the caller to specify additional
+// address properties such as primary endpoint behavior, and address lifetimes.
+func (s *Stack) AddProtocolAddressWithProperties(id tcpip.NICID, protocolAddress tcpip.ProtocolAddress, properties AddressProperties) tcpip.Error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -954,7 +954,7 @@ func (s *Stack) AddProtocolAddressWithOptions(id tcpip.NICID, protocolAddress tc
 		return &tcpip.ErrUnknownNICID{}
 	}
 
-	return nic.addAddress(protocolAddress, peb)
+	return nic.addAddress(protocolAddress, properties)
 }
 
 // RemoveAddress removes an existing network-layer address from the specified

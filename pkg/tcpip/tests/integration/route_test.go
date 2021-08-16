@@ -302,11 +302,11 @@ func TestLocalUDP(t *testing.T) {
 					}
 
 					if subTest.addAddress {
-						if err := s.AddProtocolAddressWithOptions(nicID, test.canBePrimaryAddr, stack.CanBePrimaryEndpoint); err != nil {
-							t.Fatalf("s.AddProtocolAddressWithOptions(%d, %#v, %d): %s", nicID, test.canBePrimaryAddr, stack.FirstPrimaryEndpoint, err)
+						if err := s.AddProtocolAddressWithProperties(nicID, test.canBePrimaryAddr, stack.AddressProperties{PEB: stack.CanBePrimaryEndpoint}); err != nil {
+							t.Fatalf("s.AddProtocolAddressWithProperties(%d, %#v, stack.AddressProperties{PEB: %d}): %s", nicID, test.canBePrimaryAddr, stack.FirstPrimaryEndpoint, err)
 						}
-						if err := s.AddProtocolAddressWithOptions(nicID, test.firstPrimaryAddr, stack.FirstPrimaryEndpoint); err != nil {
-							t.Fatalf("s.AddProtocolAddressWithOptions(%d, %#v, %d): %s", nicID, test.firstPrimaryAddr, stack.FirstPrimaryEndpoint, err)
+						if err := s.AddProtocolAddressWithProperties(nicID, test.firstPrimaryAddr, stack.AddressProperties{PEB: stack.FirstPrimaryEndpoint}); err != nil {
+							t.Fatalf("s.AddProtocolAddressWithProperties(%d, %#v, stack.AddressProperties{PEB: %d}): %s", nicID, test.firstPrimaryAddr, stack.FirstPrimaryEndpoint, err)
 						}
 					}
 

@@ -351,6 +351,14 @@ const (
 	AddressConfigSlaacTemp
 )
 
+// AddressProperties contains additional properties that can be configured when
+// adding an address.
+type AddressProperties struct {
+	PEB        PrimaryEndpointBehavior
+	ConfigType AddressConfigType
+	Deprecated bool
+}
+
 // AssignableAddressEndpoint is a reference counted address endpoint that may be
 // assigned to a NetworkEndpoint.
 type AssignableAddressEndpoint interface {
@@ -457,7 +465,7 @@ type AddressableEndpoint interface {
 	// Returns *tcpip.ErrDuplicateAddress if the address exists.
 	//
 	// Acquires and returns the AddressEndpoint for the added address.
-	AddAndAcquirePermanentAddress(addr tcpip.AddressWithPrefix, peb PrimaryEndpointBehavior, configType AddressConfigType, deprecated bool) (AddressEndpoint, tcpip.Error)
+	AddAndAcquirePermanentAddress(addr tcpip.AddressWithPrefix, properties AddressProperties) (AddressEndpoint, tcpip.Error)
 
 	// RemovePermanentAddress removes the passed address if it is a permanent
 	// address.

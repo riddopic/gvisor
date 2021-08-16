@@ -216,8 +216,8 @@ func TestSendQueuedMLDReports(t *testing.T) {
 			// Note, we will still expect to send a report for the global address's
 			// solicited node address from the unspecified address as per  RFC 3590
 			// section 4.
-			if err := s.AddAddressWithOptions(nicID, ipv6.ProtocolNumber, globalAddr, stack.FirstPrimaryEndpoint); err != nil {
-				t.Fatalf("AddAddressWithOptions(%d, %d, %s, %d): %s", nicID, ipv6.ProtocolNumber, globalAddr, stack.FirstPrimaryEndpoint, err)
+			if err := s.AddAddressWithProperties(nicID, ipv6.ProtocolNumber, globalAddr, stack.AddressProperties{PEB: stack.FirstPrimaryEndpoint}); err != nil {
+				t.Fatalf("AddAddressWithProperties(%d, %d, %s, AddressProperties{PEB: %d}): %s", nicID, ipv6.ProtocolNumber, globalAddr, stack.FirstPrimaryEndpoint, err)
 			}
 			reportCounter++
 			if got := reportStat.Value(); got != reportCounter {
@@ -252,8 +252,8 @@ func TestSendQueuedMLDReports(t *testing.T) {
 
 			// Adding a link-local address should send a report for its solicited node
 			// address and globalMulticastAddr.
-			if err := s.AddAddressWithOptions(nicID, ipv6.ProtocolNumber, linkLocalAddr, stack.CanBePrimaryEndpoint); err != nil {
-				t.Fatalf("AddAddressWithOptions(%d, %d, %s, %d): %s", nicID, ipv6.ProtocolNumber, linkLocalAddr, stack.CanBePrimaryEndpoint, err)
+			if err := s.AddAddressWithProperties(nicID, ipv6.ProtocolNumber, linkLocalAddr, stack.AddressProperties{PEB: stack.CanBePrimaryEndpoint}); err != nil {
+				t.Fatalf("AddAddressWithProperties(%d, %d, %s, AddressProperties{PEB: %d}): %s", nicID, ipv6.ProtocolNumber, linkLocalAddr, stack.CanBePrimaryEndpoint, err)
 			}
 			if dadResolutionTime != 0 {
 				reportCounter++

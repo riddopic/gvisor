@@ -1894,14 +1894,14 @@ func TestGetMainNICAddressAddPrimaryNonPrimary(t *testing.T) {
 											PrefixLen: addrLen * 8,
 										},
 									}
-									if err := s.AddProtocolAddressWithOptions(nicID, protocolAddress, behavior); err != nil {
-										t.Fatalf("AddProtocolAddressWithOptions(%d, %#v, %d): %s", nicID, protocolAddress, behavior, err)
+									if err := s.AddProtocolAddressWithProperties(nicID, protocolAddress, stack.AddressProperties{PEB: behavior}); err != nil {
+										t.Fatalf("AddProtocolAddressWithProperties(%d, %#v, stack.AddressProperties{PEB: %d}): %s", nicID, protocolAddress, behavior, err)
 									}
 									// Remember the address/prefix.
 									primaryAddrAdded[protocolAddress.AddressWithPrefix] = struct{}{}
 								} else {
-									if err := s.AddAddressWithOptions(nicID, fakeNetNumber, address, behavior); err != nil {
-										t.Fatalf("AddAddressWithOptions(%d, %d, %s, %d): %s:", nicID, fakeNetNumber, address, behavior, err)
+									if err := s.AddAddressWithProperties(nicID, fakeNetNumber, address, stack.AddressProperties{PEB: behavior}); err != nil {
+										t.Fatalf("AddAddressWithProperties(%d, %d, %s, AddressProperties{PEB: %d}): %s:", nicID, fakeNetNumber, address, behavior, err)
 									}
 								}
 							}
@@ -2108,7 +2108,7 @@ func TestAddProtocolAddress(t *testing.T) {
 	verifyAddresses(t, expectedAddresses, gotAddresses)
 }
 
-func TestAddAddressWithOptions(t *testing.T) {
+func TestAddAddressWithProperties(t *testing.T) {
 	const nicID = 1
 	s := stack.New(stack.Options{
 		NetworkProtocols: []stack.NetworkProtocolFactory{fakeNetFactory},
@@ -2120,54 +2120,27 @@ func TestAddAddressWithOptions(t *testing.T) {
 
 	addrLenRange := []int{4, 16}
 	behaviorRange := []stack.PrimaryEndpointBehavior{stack.CanBePrimaryEndpoint, stack.FirstPrimaryEndpoint, stack.NeverPrimaryEndpoint}
-	expectedAddresses := make([]tcpip.ProtocolAddress, 0, len(addrLenRange)*len(behaviorRange))
+	configTypeRange := []stack.AddressConfigType{stack.AddressConfigStatic, stack.AddressConfigSlaac, stack.AddressConfigSlaacTemp}
+	deprecatedRange := []bool{false, true}
+	expectedAddresses := make([]tcpip.ProtocolAddress, 0, len(addrLenRange)*len(behaviorRange)*len(configTypeRange)*len(deprecatedRange))
 	var addrGen addressGenerator
 	for _, addrLen := range addrLenRange {
 		for _, behavior := range behaviorRange {
-			address := addrGen.next(addrLen)
-			if err := s.AddAddressWithOptions(nicID, fakeNetNumber, address, behavior); err != nil {
-				t.Fatalf("AddAddressWithOptions(address=%s, behavior=%d) failed: %s", address, behavior, err)
-			}
-			expectedAddresses = append(expectedAddresses, tcpip.ProtocolAddress{
-				Protocol:          fakeNetNumber,
-				AddressWithPrefix: tcpip.AddressWithPrefix{Address: address, PrefixLen: fakeDefaultPrefixLen},
-			})
-		}
-	}
-
-	gotAddresses := s.AllAddresses()[nicID]
-	verifyAddresses(t, expectedAddresses, gotAddresses)
-}
-
-func TestAddProtocolAddressWithOptions(t *testing.T) {
-	const nicID = 1
-	s := stack.New(stack.Options{
-		NetworkProtocols: []stack.NetworkProtocolFactory{fakeNetFactory},
-	})
-	ep := channel.New(10, defaultMTU, "")
-	if err := s.CreateNIC(nicID, ep); err != nil {
-		t.Fatal("CreateNIC failed:", err)
-	}
-
-	addrLenRange := []int{4, 16}
-	prefixLenRange := []int{8, 13, 20, 32}
-	behaviorRange := []stack.PrimaryEndpointBehavior{stack.CanBePrimaryEndpoint, stack.FirstPrimaryEndpoint, stack.NeverPrimaryEndpoint}
-	expectedAddresses := make([]tcpip.ProtocolAddress, 0, len(addrLenRange)*len(prefixLenRange)*len(behaviorRange))
-	var addrGen addressGenerator
-	for _, addrLen := range addrLenRange {
-		for _, prefixLen := range prefixLenRange {
-			for _, behavior := range behaviorRange {
-				protocolAddress := tcpip.ProtocolAddress{
-					Protocol: fakeNetNumber,
-					AddressWithPrefix: tcpip.AddressWithPrefix{
-						Address:   addrGen.next(addrLen),
-						PrefixLen: prefixLen,
-					},
+			for _, configType := range configTypeRange {
+				for _, deprecated := range deprecatedRange {
+					address := addrGen.next(addrLen)
+					if err := s.AddAddressWithProperties(nicID, fakeNetNumber, address, stack.AddressProperties{
+						PEB:        behavior,
+						ConfigType: configType,
+						Deprecated: deprecated,
+					}); err != nil {
+						t.Fatalf("AddAddressWithProperties(address=%s, AddressProperties{PEB: %d, ConfigType: %d, Deprecated: %t}) failed: %s", address, behavior, configType, deprecated, err)
+					}
+					expectedAddresses = append(expectedAddresses, tcpip.ProtocolAddress{
+						Protocol:          fakeNetNumber,
+						AddressWithPrefix: tcpip.AddressWithPrefix{Address: address, PrefixLen: fakeDefaultPrefixLen},
+					})
 				}
-				if err := s.AddProtocolAddressWithOptions(nicID, protocolAddress, behavior); err != nil {
-					t.Fatalf("AddProtocolAddressWithOptions(%+v, %d) failed: %s", protocolAddress, behavior, err)
-				}
-				expectedAddresses = append(expectedAddresses, protocolAddress)
 			}
 		}
 	}
@@ -2735,8 +2708,8 @@ func TestNewPEBOnPromotionToPermanent(t *testing.T) {
 				// be returned by a call to GetMainNICAddress;
 				// else, it should.
 				const address1 = tcpip.Address("\x01")
-				if err := s.AddAddressWithOptions(nicID, fakeNetNumber, address1, pi); err != nil {
-					t.Fatalf("AddAddressWithOptions(%d, %d, %s, %d): %s", nicID, fakeNetNumber, address1, pi, err)
+				if err := s.AddAddressWithProperties(nicID, fakeNetNumber, address1, stack.AddressProperties{PEB: pi}); err != nil {
+					t.Fatalf("AddAddressWithProperties(%d, %d, %s, AddressProperties{PEB: %d}): %s", nicID, fakeNetNumber, address1, pi, err)
 				}
 				addr, err := s.GetMainNICAddress(nicID, fakeNetNumber)
 				if err != nil {
@@ -2785,16 +2758,16 @@ func TestNewPEBOnPromotionToPermanent(t *testing.T) {
 				// Add some other address with peb set to
 				// FirstPrimaryEndpoint.
 				const address3 = tcpip.Address("\x03")
-				if err := s.AddAddressWithOptions(nicID, fakeNetNumber, address3, stack.FirstPrimaryEndpoint); err != nil {
-					t.Fatalf("AddAddressWithOptions(%d, %d, %s, %d): %s", nicID, fakeNetNumber, address3, stack.FirstPrimaryEndpoint, err)
+				if err := s.AddAddressWithProperties(nicID, fakeNetNumber, address3, stack.AddressProperties{PEB: stack.FirstPrimaryEndpoint}); err != nil {
+					t.Fatalf("AddAddressWithProperties(%d, %d, %s, AddressProperties{PEB: %d}): %s", nicID, fakeNetNumber, address3, stack.FirstPrimaryEndpoint, err)
 
 				}
 
 				// Add back the address we removed earlier and
 				// make sure the new peb was respected.
 				// (The address should just be promoted now).
-				if err := s.AddAddressWithOptions(nicID, fakeNetNumber, address1, ps); err != nil {
-					t.Fatalf("AddAddressWithOptions(%d, %d, %s, %d): %s", nicID, fakeNetNumber, address1, pi, err)
+				if err := s.AddAddressWithProperties(nicID, fakeNetNumber, address1, stack.AddressProperties{PEB: ps}); err != nil {
+					t.Fatalf("AddAddressWithProperties(%d, %d, %s, AddressProperties{PEB: %d}): %s", nicID, fakeNetNumber, address1, pi, err)
 				}
 				var primaryAddrs []tcpip.Address
 				for _, pa := range s.NICInfo()[nicID].ProtocolAddresses {
